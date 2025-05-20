@@ -19,7 +19,7 @@ void ThreadPoolCallbackRunnerFast::initThreadPool(ThreadPool & pool_, size_t max
     thread_name = thread_name_;
     thread_group = thread_group_;
 
-    /// TODO: Maybe adjust number of threads dynamically based on queue size.
+    /// TODO [parquet]: Maybe adjust number of threads dynamically based on queue size.
     threads = max_threads;
     for (size_t i = 0; i < max_threads; ++i)
         pool->scheduleOrThrowOnError([this] { threadFunction(); });
@@ -136,7 +136,6 @@ void ThreadPoolCallbackRunnerFast::threadFunction()
         lock.lock();
     }
 }
-
 
 bool ShutdownHelper::try_lock_shared()
 {

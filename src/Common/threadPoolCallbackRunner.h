@@ -245,7 +245,7 @@ public:
         Disabled,
     };
 
-    /// TODO: Add metrics for queue size and active threads, and maybe event for tasks executed.
+    /// TODO [parquet]: Add metrics for queue size and active threads, and maybe event for tasks executed.
 
     ThreadPoolCallbackRunnerFast();
 
@@ -349,7 +349,6 @@ private:
     std::mutex mutex;
     std::condition_variable cv;
 };
-
 
 extern template ThreadPoolCallbackRunnerUnsafe<void> threadPoolCallbackRunnerUnsafe<void>(ThreadPool &, const std::string &);
 extern template class ThreadPoolCallbackRunnerLocal<void>;
