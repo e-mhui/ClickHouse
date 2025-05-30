@@ -1,11 +1,36 @@
 #include <Common/threadPoolCallbackRunner.h>
 
+#include <Common/futex.h>
+
 namespace DB
 {
 
 namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
+}
+
+void CountingSemaphore::acquire()
+{
+    UInt32 x = val.load(std::memory_order_relaxed);
+    while (true)
+    {
+        if (x == 0)
+        {
+            futexWait(&val, 0);
+            x = val.load(std::memory_order_relaxed);
+        }
+        else if (val.compare_exchange_weak(
+                    x, x - 1, std::memory_order_acquire, std::memory_order_relaxed))
+            break;
+    }
+}
+
+void CountingSemaphore::release(UInt32 n, UInt32 wake_threshold)
+{
+    UInt32 x = val.fetch_add(n, std::memory_order_release);
+    if (x < wake_threshold)
+        futexWake(&val, n);
 }
 
 ThreadPoolCallbackRunnerFast::ThreadPoolCallbackRunnerFast() = default;
@@ -40,7 +65,7 @@ void ThreadPoolCallbackRunnerFast::shutdown()
     /// May be called twice.
     std::unique_lock lock(mutex);
     shutdown_requested = true;
-    queue_cv.notify_all();
+    queue_sem.release(UINT32_MAX / 4);
     shutdown_cv.wait(lock, [&] { return threads == 0; });
 }
 
@@ -53,7 +78,9 @@ void ThreadPoolCallbackRunnerFast::operator()(std::function<void()> f)
         std::unique_lock lock(mutex);
         queue.push_back(std::move(f));
     }
-    queue_cv.notify_one();
+
+    if (mode == Mode::ThreadPool)
+        queue_sem.release(1, max_threads);
 }
 
 void ThreadPoolCallbackRunnerFast::bulkSchedule(std::vector<std::function<void()>> fs)
@@ -69,15 +96,8 @@ void ThreadPoolCallbackRunnerFast::bulkSchedule(std::vector<std::function<void()
         queue.insert(queue.end(), std::move_iterator(fs.begin()), std::move_iterator(fs.end()));
     }
 
-    if (fs.size() <= 2 || fs.size() * 4 < max_threads) // (numbers chosen at random, not optimized)
-    {
-        for (size_t i = 0; i < fs.size(); ++i)
-            queue_cv.notify_one();
-    }
-    else
-    {
-        queue_cv.notify_all();
-    }
+    if (mode == Mode::ThreadPool)
+        queue_sem.release(fs.size(), max_threads);
 }
 
 bool ThreadPoolCallbackRunnerFast::runTaskInline()
@@ -98,28 +118,27 @@ void ThreadPoolCallbackRunnerFast::threadFunction()
 {
     ThreadGroupSwitcher switcher(thread_group, thread_name.c_str());
 
-    std::unique_lock lock(mutex);
     while (true)
     {
-        chassert(lock.owns_lock());
-        if (shutdown_requested)
+        queue_sem.acquire();
+
+        std::function<void()> f;
         {
-            threads -= 1;
-            if (threads == 0)
-                shutdown_cv.notify_all();
-            return;
+            std::unique_lock lock(mutex);
+
+            if (shutdown_requested)
+            {
+                threads -= 1;
+                if (threads == 0)
+                    shutdown_cv.notify_all();
+                return;
+            }
+
+            chassert(!queue.empty());
+
+            f = std::move(queue.front());
+            queue.pop_front();
         }
-
-        if (queue.empty())
-        {
-            queue_cv.wait(lock);
-            continue;
-        }
-
-        std::function<void()> f = std::move(queue.front());
-        queue.pop_front();
-
-        lock.unlock();
 
         try
         {
@@ -132,8 +151,6 @@ void ThreadPoolCallbackRunnerFast::threadFunction()
             tryLogCurrentException("FastThreadPool");
             chassert(false);
         }
-
-        lock.lock();
     }
 }
 

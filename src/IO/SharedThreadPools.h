@@ -80,6 +80,7 @@ StaticThreadPool & getDatabaseCatalogDropTablesThreadPool();
 StaticThreadPool & getMergeTreePrefixesDeserializationThreadPool();
 
 /// TODO [parquet]: Use it in ParallelParsingInputFormat, DWARFBlockInputFormat, and ParquetBlockInputFormat.
+//asdqwe move to shp
 StaticThreadPool & getFormatParsingThreadPool();
 
 }
