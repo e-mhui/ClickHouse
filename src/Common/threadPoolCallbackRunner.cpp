@@ -10,29 +10,6 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
-void CountingSemaphore::acquire()
-{
-    UInt32 x = val.load(std::memory_order_relaxed);
-    while (true)
-    {
-        if (x == 0)
-        {
-            futexWait(&val, 0);
-            x = val.load(std::memory_order_relaxed);
-        }
-        else if (val.compare_exchange_weak(
-                    x, x - 1, std::memory_order_acquire, std::memory_order_relaxed))
-            break;
-    }
-}
-
-void CountingSemaphore::release(UInt32 n, UInt32 wake_threshold)
-{
-    UInt32 x = val.fetch_add(n, std::memory_order_release);
-    if (x < wake_threshold)
-        futexWake(&val, n);
-}
-
 ThreadPoolCallbackRunnerFast::ThreadPoolCallbackRunnerFast() = default;
 
 void ThreadPoolCallbackRunnerFast::initThreadPool(ThreadPool & pool_, size_t max_threads_, std::string thread_name_, ThreadGroupPtr thread_group_)
@@ -62,10 +39,16 @@ ThreadPoolCallbackRunnerFast::~ThreadPoolCallbackRunnerFast()
 
 void ThreadPoolCallbackRunnerFast::shutdown()
 {
-    /// May be called twice.
+    /// May be called multiple times.
     std::unique_lock lock(mutex);
     shutdown_requested = true;
-    queue_sem.release(UINT32_MAX / 4);
+#ifdef OS_LINUX
+    const UInt32 a_lot = UINT32_MAX / 4;
+    queue_size += a_lot;
+    futexWake(&queue_size, a_lot);
+#else
+    queue_cv.notify_all();
+#endif
     shutdown_cv.wait(lock, [&] { return threads == 0; });
 }
 
@@ -80,7 +63,15 @@ void ThreadPoolCallbackRunnerFast::operator()(std::function<void()> f)
     }
 
     if (mode == Mode::ThreadPool)
-        queue_sem.release(1, max_threads);
+    {
+#ifdef OS_LINUX
+        UInt32 prev_size = queue_size.fetch_add(1, std::memory_order_release);
+        if (prev_size < max_threads)
+            futexWake(&queue_size, 1);
+#else
+        queue_cv.notify_one();
+#endif
+    }
 }
 
 void ThreadPoolCallbackRunnerFast::bulkSchedule(std::vector<std::function<void()>> fs)
@@ -97,7 +88,19 @@ void ThreadPoolCallbackRunnerFast::bulkSchedule(std::vector<std::function<void()
     }
 
     if (mode == Mode::ThreadPool)
-        queue_sem.release(fs.size(), max_threads);
+    {
+#ifdef OS_LINUX
+        UInt32 prev_size = queue_size.fetch_add(fs.size(), std::memory_order_release);
+        if (prev_size < max_threads)
+            futexWake(&queue_size, fs.size());
+#else
+        if (fs.size() < 4)
+            for (size_t i = 0; i < fs.size(); ++i)
+                queue_cv.notify_one();
+        else
+            queue_cv.notify_all();
+#endif
+    }
 }
 
 bool ThreadPoolCallbackRunnerFast::runTaskInline()
@@ -120,11 +123,28 @@ void ThreadPoolCallbackRunnerFast::threadFunction()
 
     while (true)
     {
-        queue_sem.acquire();
+#ifdef OS_LINUX
+        UInt32 x = queue_size.load(std::memory_order_relaxed);
+        while (true)
+        {
+            if (x == 0)
+            {
+                futexWait(&queue_size, 0);
+                x = queue_size.load(std::memory_order_relaxed);
+            }
+            else if (queue_size.compare_exchange_weak(
+                        x, x - 1, std::memory_order_acquire, std::memory_order_relaxed))
+                break;
+        }
+#endif
 
         std::function<void()> f;
         {
             std::unique_lock lock(mutex);
+
+#ifndef OS_LINUX
+            queue_cv.wait(lock, [&] { return shutdown_requested || !queue.empty(); });
+#endif
 
             if (shutdown_requested)
             {
@@ -202,12 +222,21 @@ bool ShutdownHelper::shutdown_requested()
     return val.load(std::memory_order_relaxed) >= SHUTDOWN_START;
 }
 
-void ShutdownHelper::begin_shutdown()
+bool ShutdownHelper::begin_shutdown()
 {
     Int64 n = val.fetch_add(SHUTDOWN_START) + SHUTDOWN_START;
-    chassert(n < SHUTDOWN_START * 2); // shutdown requested more than once
+    bool already_called = n >= SHUTDOWN_START * 2;
+    if (already_called)
+        n = val.fetch_sub(SHUTDOWN_START) - SHUTDOWN_START;
     if (n == SHUTDOWN_START)
+    {
         val.fetch_add(SHUTDOWN_END);
+        {
+            std::unique_lock lock(mutex);
+        }
+        cv.notify_all();
+    }
+    return !already_called;
 }
 
 void ShutdownHelper::wait_shutdown()

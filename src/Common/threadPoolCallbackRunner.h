@@ -221,21 +221,6 @@ public:
 
         tasks.clear();
     }
-
-};
-
-//asdqwe
-class CountingSemaphore
-{
-private:
-    std::atomic<UInt32> val {0};
-
-public:
-    CountingSemaphore() = default;
-
-    void acquire();
-
-    void release(UInt32 n, UInt32 wake_threshold = UINT32_MAX);
 };
 
 /// Has a task queue and a set of threads from ThreadPool.
@@ -303,8 +288,12 @@ private:
 
     std::deque<std::function<void()>> queue;
 
-    //asdqwe fallback to queue_cv
-    CountingSemaphore queue_sem;
+#ifdef OS_LINUX
+    /// Use futex when available. It's faster than condition_variable, especially on the enqueue side.
+    std::atomic<UInt32> queue_size {0};
+#else
+    std::condition_variable queue_cv;
+#endif
 
     void threadFunction();
 };
@@ -349,9 +338,11 @@ public:
     /// For re-checking in the middle of long-running operation while already holding a lock.
     bool shutdown_requested();
 
-    void begin_shutdown();
+    /// Returns false if shutdown was already requested before.
+    bool begin_shutdown();
     void wait_shutdown();
 
+    /// Equivalent to `begin_shutdown(); end_shutdown();`. Ok to call multiple times.
     void shutdown();
 
 private:
@@ -361,6 +352,7 @@ private:
     /// If >= SHUTDOWN_START, no new try_lock_shared() calls will succeed.
     /// Whoever changes the value to exactly SHUTDOWN_START (i.e. shutdown requested, no shared locks)
     /// must then add SHUTDOWN_END to it.
+    /// Note that SHUTDOWN_END might be added multiple times because of benign race conditions.
     std::atomic<Int64> val {0};
     std::mutex mutex;
     std::condition_variable cv;
