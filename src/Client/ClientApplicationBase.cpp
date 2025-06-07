@@ -6,6 +6,7 @@
 #include <Common/TerminalSize.h>
 #include <Common/Exception.h>
 #include <Common/SignalHandlers.h>
+#include <Client/JwtProvider.h>
 
 #include <Common/config_version.h>
 #include "config.h"
@@ -15,6 +16,23 @@
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/algorithm/string/split.hpp>
+
+// For HTTP client, JSON, and device flow
+#include <Poco/Net/HTTPClientSession.h>
+#include <Poco/Net/HTTPRequest.h>
+#include <Poco/Net/HTTPResponse.h>
+#include <Poco/Net/HTTPSClientSession.h>
+#include <Poco/Net/Context.h>
+#include <Poco/Net/SSLManager.h>
+#include <Poco/StreamCopier.h>
+#include <Poco/URI.h>
+#include <Poco/JSON/Parser.h>
+#include <Poco/JSON/Object.h>
+#include <Poco/Dynamic/Var.h>
+#include <iostream>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
 
 using namespace std::literals;
 
@@ -31,6 +49,7 @@ namespace ErrorCodes
     extern const int BAD_ARGUMENTS;
     extern const int CANNOT_SET_SIGNAL_HANDLER;
     extern const int SUPPORT_IS_DISABLED;
+    extern const int NETWORK_ERROR;
 }
 
 static ClientInfo::QueryKind parseQueryKind(const String & query_kind)
@@ -208,6 +227,43 @@ void ClientApplicationBase::init(int argc, char ** argv)
     }
 
     addOptionsToTheClientConfiguration(options);
+
+    if (getClientConfiguration().has("login"))
+    {
+        std::string login_url = getClientConfiguration().getString("login");
+        std::string client_id_val = getClientConfiguration().getString("auth-client-id", "");
+        std::string cp_url = getClientConfiguration().getString("control-plane-url", "");
+
+        std::unique_ptr<JwtProvider> provider = createJwtProvider(login_url, client_id_val, cp_url, output_stream, error_stream);
+        if (provider)
+        {
+            std::string jwt = provider->getJWT();
+            if (!jwt.empty())
+            {
+                getClientConfiguration().setString("jwt", jwt);
+                if (getClientConfiguration().has("password"))
+                     getClientConfiguration().remove("password");
+                if (getClientConfiguration().has("ask-password"))
+                     getClientConfiguration().remove("ask-password");
+            }
+            else
+            {
+                error_stream << "Login process failed. Exiting." << std::endl;
+                exit(1);
+            }
+
+            bool has_action = getClientConfiguration().has("query") ||
+                              getClientConfiguration().has("queries-file") ||
+                              getClientConfiguration().getBool("interactive", false) ||
+                              !queries.empty() ||
+                              !queries_files.empty();
+            if (!has_action)
+            {
+                 output_stream << "Login successful. No further actions specified. Exiting." << std::endl;
+                 exit(0);
+            }
+        }
+    }
 
     query_processing_stage = QueryProcessingStage::fromString(options["stage"].as<std::string>());
     query_kind = parseQueryKind(options["query_kind"].as<std::string>());

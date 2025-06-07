@@ -2928,6 +2928,10 @@ void ClientBase::addCommonOptions(OptionsDescription & options_description)
 
         ("config-file,C", po::value<std::string>(), "Path to config file")
 
+        ("login", po::value<std::string>(), "Perform device grant flow using the provided Auth0 authority URL (e.g., https://your-domain.auth0.com)")
+        ("auth-client-id", po::value<std::string>(), "Client ID for the Auth0 application. Used with --login.")
+        ("control-plane-url", po::value<std::string>(), "URL of the control plane for token exchange. Used with --login.")
+
         ("proto_caps", po::value<std::string>(), "Enable/disable chunked protocol: chunked_optional, notchunked, notchunked_optional, send_chunked, send_chunked_optional, send_notchunked, send_notchunked_optional, recv_chunked, recv_chunked_optional, recv_notchunked, recv_notchunked_optional")
 
         ("query,q", po::value<std::vector<std::string>>()->multitoken(), R"(Query. Can be specified multiple times (--query "SELECT 1" --query "SELECT 2") or once with multiple semicolon-separated queries (--query "SELECT 1; SELECT 2;"). In the latter case, INSERT queries with non-VALUE format must be separated by empty lines.)")
@@ -3113,6 +3117,13 @@ void ClientBase::addOptionsToTheClientConfiguration(const CommandLineOptions & o
 
     if (options.count("prompt"))
         getClientConfiguration().setString("prompt", options["prompt"].as<std::string>());
+
+    if (options.count("login"))
+        getClientConfiguration().setString("login", options["login"].as<std::string>());
+    if (options.count("auth-client-id"))
+        getClientConfiguration().setString("auth-client-id", options["auth-client-id"].as<std::string>());
+    if (options.count("control-plane-url"))
+        getClientConfiguration().setString("control-plane-url", options["control-plane-url"].as<std::string>());
 
     if (options.count("log-level"))
         Poco::Logger::root().setLevel(options["log-level"].as<std::string>());
