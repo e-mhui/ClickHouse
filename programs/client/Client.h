@@ -32,6 +32,8 @@ protected:
     bool buzzHouse() override;
     bool processASTFuzzerStep(const String & query_to_execute, const ASTPtr & parsed_query);
 
+    void login();
+
     void connect() override;
 
     void processError(std::string_view query) const override;

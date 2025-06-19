@@ -1,5 +1,6 @@
 #include <Client/CloudJwtProvider.h>
 #include <Common/Exception.h>
+#include <Common/StringUtils.h>
 #include <config.h>
 
 #include <Poco/Net/HTTPClientSession.h>
@@ -35,10 +36,10 @@ namespace
 }
 
 CloudJwtProvider::CloudJwtProvider(
-    std::string auth_url, std::string client_id, std::string control_plane_url,
+    std::string auth_url, std::string client_id, std::string host,
     std::ostream & out, std::ostream & err)
     : JwtProvider(std::move(auth_url), std::move(client_id), out, err),
-      control_plane_url_str(std::move(control_plane_url)) {}
+      host_str(std::move(host)) {}
 
 std::string CloudJwtProvider::getJWT()
 {
@@ -63,15 +64,22 @@ std::string CloudJwtProvider::getJWT()
 
 bool CloudJwtProvider::swapIdPTokenForClickHouseJWT()
 {
-    if (control_plane_url_str.empty())
+    const auto * endpoints = getAuthEndpoints(host_str);
+
+    if (!endpoints)
     {
-        error_stream << "Error: --control-plane-url is required for token swap." << std::endl;
+        error_stream << "Error: cannot determine token swap endpoint from hostname " << host_str
+                     << ". Please use a managed ClickHouse hostname." << std::endl;
         return false;
     }
+
+    std::string swap_url = endpoints->api_host + "/token-swap";
+
     output_stream << "Swapping IdP token for a ClickHouse JWT..." << std::endl;
     try
     {
-        Poco::URI swap_uri(control_plane_url_str);
+        Poco::URI swap_uri(swap_url);
+        swap_uri.addQueryParameter("hostname", host_str);
         auto session = createHTTPSession(swap_uri);
         Poco::Net::HTTPRequest request(Poco::Net::HTTPRequest::HTTP_POST, swap_uri.getPathAndQuery(), Poco::Net::HTTPMessage::HTTP_1_1);
         request.set("Authorization", "Bearer " + idp_access_token);

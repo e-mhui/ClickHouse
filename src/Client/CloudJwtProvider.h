@@ -15,7 +15,7 @@ public:
     CloudJwtProvider(
         std::string auth_url,
         std::string client_id,
-        std::string control_plane_url,
+        std::string host,
         std::ostream & out,
         std::ostream & err);
 
@@ -25,7 +25,7 @@ private:
     bool swapIdPTokenForClickHouseJWT();
 
     // Configuration
-    std::string control_plane_url_str;
+    std::string host_str;
 
     // Token State
     std::string final_clickhouse_jwt;

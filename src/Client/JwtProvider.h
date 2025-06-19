@@ -2,6 +2,7 @@
 
 #include <config.h>
 
+#include <Common/StringUtils.h>
 #include <Poco/Net/Context.h>
 #include <Poco/Net/HTTPSClientSession.h>
 #include <Poco/Net/SSLManager.h>
@@ -9,11 +10,40 @@
 #include <Poco/URI.h>
 
 #include <iosfwd>
+#include <map>
 #include <memory>
 #include <string>
 
 namespace DB
 {
+
+struct AuthEndpoints
+{
+    std::string auth_url;
+    std::string client_id;
+    std::string api_host;
+};
+
+static const std::map<std::string, AuthEndpoints> managed_service_endpoints = {
+    {
+        ".clickhouse-dev.com",
+        {
+            "https://ch-local-dev.us.auth0.com",
+            "HxCYHJpfUCQtX6Y8EzFWImHLVFbVNahh",
+            "https://console-api.clickhouse-dev.com"
+        }
+    }
+};
+
+inline const AuthEndpoints * getAuthEndpoints(const std::string & host)
+{
+    for (const auto & [suffix, endpoints] : managed_service_endpoints)
+    {
+        if (endsWith(host, suffix))
+            return &endpoints;
+    }
+    return nullptr;
+}
 
 class JwtProvider
 {
@@ -56,7 +86,7 @@ protected:
 std::unique_ptr<JwtProvider> createJwtProvider(
     const std::string & auth_url,
     const std::string & client_id,
-    const std::string & control_plane_url,
+    const std::string & host,
     std::ostream & out,
     std::ostream & err);
 

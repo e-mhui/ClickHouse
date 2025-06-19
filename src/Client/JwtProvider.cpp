@@ -46,7 +46,6 @@ JwtProvider::JwtProvider(
 
 bool JwtProvider::initialLogin()
 {
-    output_stream << "Starting device login flow..." << std::endl;
     Poco::URI auth_uri_check(auth_url_str);
     std::string base_auth_url = auth_uri_check.getScheme() + "://" + auth_uri_check.getAuthority();
     std::string device_code_url_str = base_auth_url + "/oauth/device/code";
@@ -94,8 +93,8 @@ bool JwtProvider::initialLogin()
         interval_seconds = object->getValue<int>("interval");
         expires_at_ts = Poco::Timestamp().epochTime() + object->getValue<int>("expires_in");
 
-        output_stream << "\nTo authenticate, please use the following code: " << user_code << "\n"
-                      << "Attempting to automatically open the authentication URL in your browser." << std::endl;
+        output_stream << "Attempting to automatically open the authentication URL in your browser.\n"
+                      << "To authenticate, please use the following code: " << user_code << "\n" << std::endl;
 
         if (!openURLInBrowser(verification_uri_complete))
         {
@@ -150,7 +149,7 @@ bool JwtProvider::initialLogin()
         }
         catch (const Poco::Exception & ex)
         {
-            error_stream << "Exception during token polling: " << ex.displayText() << std::endl;
+            error_stream << "Error waiting for authorization: " << ex.displayText() << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(5));
         }
     }
@@ -258,15 +257,13 @@ Poco::Timestamp JwtProvider::getJwtExpiry(const std::string & token)
 std::unique_ptr<JwtProvider> createJwtProvider(
     const std::string & auth_url,
     const std::string & client_id,
-    const std::string & control_plane_url,
+    const std::string & host,
     std::ostream & out,
     std::ostream & err)
 {
-    // If the control plane URL is explicitly provided, or if the auth URL matches
-    // the managed service endpoint, use the managed provider.
-    if (!control_plane_url.empty() || startsWith(auth_url, "https://auth.clickhouse.cloud"))
+    if (endsWith(host, ".clickhouse.cloud") || endsWith(host, ".clickhouse-staging.com") || endsWith(host, ".clickhouse-dev.com"))
     {
-        return std::make_unique<CloudJwtProvider>(auth_url, client_id, control_plane_url, out, err);
+        return std::make_unique<CloudJwtProvider>(auth_url, client_id, host, out, err);
     }
     else
     {

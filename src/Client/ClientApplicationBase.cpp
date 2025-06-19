@@ -228,43 +228,6 @@ void ClientApplicationBase::init(int argc, char ** argv)
 
     addOptionsToTheClientConfiguration(options);
 
-    if (getClientConfiguration().has("login"))
-    {
-        std::string login_url = getClientConfiguration().getString("login");
-        std::string client_id_val = getClientConfiguration().getString("auth-client-id", "");
-        std::string cp_url = getClientConfiguration().getString("control-plane-url", "");
-
-        std::unique_ptr<JwtProvider> provider = createJwtProvider(login_url, client_id_val, cp_url, output_stream, error_stream);
-        if (provider)
-        {
-            std::string jwt = provider->getJWT();
-            if (!jwt.empty())
-            {
-                getClientConfiguration().setString("jwt", jwt);
-                if (getClientConfiguration().has("password"))
-                     getClientConfiguration().remove("password");
-                if (getClientConfiguration().has("ask-password"))
-                     getClientConfiguration().remove("ask-password");
-            }
-            else
-            {
-                error_stream << "Login process failed. Exiting." << std::endl;
-                exit(1);
-            }
-
-            bool has_action = getClientConfiguration().has("query") ||
-                              getClientConfiguration().has("queries-file") ||
-                              getClientConfiguration().getBool("interactive", false) ||
-                              !queries.empty() ||
-                              !queries_files.empty();
-            if (!has_action)
-            {
-                 output_stream << "Login successful. No further actions specified. Exiting." << std::endl;
-                 exit(0);
-            }
-        }
-    }
-
     query_processing_stage = QueryProcessingStage::fromString(options["stage"].as<std::string>());
     query_kind = parseQueryKind(options["query_kind"].as<std::string>());
     profile_events.print = options.count("print-profile-events");

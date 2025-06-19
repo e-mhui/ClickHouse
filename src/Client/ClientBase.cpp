@@ -2928,9 +2928,9 @@ void ClientBase::addCommonOptions(OptionsDescription & options_description)
 
         ("config-file,C", po::value<std::string>(), "Path to config file")
 
-        ("login", po::value<std::string>(), "Perform device grant flow using the provided Auth0 authority URL (e.g., https://your-domain.auth0.com)")
-        ("auth-client-id", po::value<std::string>(), "Client ID for the Auth0 application. Used with --login.")
-        ("control-plane-url", po::value<std::string>(), "URL of the control plane for token exchange. Used with --login.")
+        ("login", po::bool_switch(), "Perform device grant flow for authentication.")
+        ("auth-url", po::value<std::string>(), "The authentication URL for the device grant flow.")
+        ("auth-client-id", po::value<std::string>(), "Client ID for the authentication application.")
 
         ("proto_caps", po::value<std::string>(), "Enable/disable chunked protocol: chunked_optional, notchunked, notchunked_optional, send_chunked, send_chunked_optional, send_notchunked, send_notchunked_optional, recv_chunked, recv_chunked_optional, recv_notchunked, recv_notchunked_optional")
 
@@ -3119,7 +3119,9 @@ void ClientBase::addOptionsToTheClientConfiguration(const CommandLineOptions & o
         getClientConfiguration().setString("prompt", options["prompt"].as<std::string>());
 
     if (options.count("login"))
-        getClientConfiguration().setString("login", options["login"].as<std::string>());
+        getClientConfiguration().setBool("login", options["login"].as<bool>());
+    if (options.count("auth-url"))
+        getClientConfiguration().setString("auth-url", options["auth-url"].as<std::string>());
     if (options.count("auth-client-id"))
         getClientConfiguration().setString("auth-client-id", options["auth-client-id"].as<std::string>());
     if (options.count("control-plane-url"))

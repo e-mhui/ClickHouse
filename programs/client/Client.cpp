@@ -23,6 +23,10 @@
 #include <IO/WriteHelpers.h>
 #include <Interpreters/Context.h>
 
+#include <Client/JwtProvider.h>
+#include <Client/CloudJwtProvider.h>
+#include <Client/ExternalIdpJwtProvider.h>
+
 #include <AggregateFunctions/registerAggregateFunctions.h>
 #include <Formats/FormatFactory.h>
 #include <Formats/registerFormats.h>
@@ -376,6 +380,11 @@ try
         showClientVersion();
     }
 
+    if (config().has("login"))
+    {
+        login();
+    }
+
     try
     {
         connect();
@@ -445,6 +454,46 @@ catch (...)
     return getCurrentExceptionCode();
 }
 
+void Client::login()
+{
+    std::string host = hosts_and_ports.front().host;
+    std::string auth_url = getClientConfiguration().getString("auth-url", "");
+    std::string client_id = getClientConfiguration().getString("auth-client-id", "");
+
+    if (auth_url.empty() || client_id.empty())
+    {
+        if (const auto * endpoints = getAuthEndpoints(host))
+        {
+            if (auth_url.empty())
+                auth_url = endpoints->auth_url;
+            if (client_id.empty())
+                client_id = endpoints->client_id;
+        }
+        else
+        {
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "Could not retrieve authentication endpoints for host '{}'. Please specify --auth-url and --auth-client-id if you are "
+                "not using ClickHouse Cloud.",
+                host);
+        }
+    }
+
+    std::unique_ptr<JwtProvider> provider = createJwtProvider(auth_url, client_id, host, output_stream, error_stream);
+    if (provider)
+    {
+        std::string jwt = provider->getJWT();
+        if (!jwt.empty())
+        {
+            getClientConfiguration().setString("jwt", jwt);
+        }
+        else
+        {
+            error_stream << "Login failed. Please check your credentials and try again." << std::endl;
+            exit(1);
+        }
+    }
+}
 
 void Client::connect()
 {
